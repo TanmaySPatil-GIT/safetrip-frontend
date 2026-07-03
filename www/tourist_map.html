@@ -187,35 +187,41 @@
 
         let touristMarker = null;
 
-        // Draw Yosemite Routes (Planned blocked vs Alternate safe)
-        const plannedCoords = [
-            [37.737, -119.573], // Curry Village
-            [37.728, -119.544], // Vernal Fall
-            [37.725, -119.533], // Nevada Fall
-            [37.7456, -119.5332] // Half Dome Cables (Danger Zone)
-        ];
+        // Draw Yosemite Routes conditionally if no destination lat/lng is passed
+        const destLat = parseFloat(urlParams.get('dest_lat'));
+        const destLng = parseFloat(urlParams.get('dest_lng'));
+        const hasDest = !isNaN(destLat) && !isNaN(destLng) && destLat !== 0.0 && destLng !== 0.0;
 
-        const alternateCoords = [
-            [37.737, -119.573], // Curry Village
-            [37.728, -119.544], // Vernal Fall
-            [37.735, -119.525], // Detour point
-            [37.755, -119.515], // Clouds Rest trail (East of cables)
-            [37.765, -119.525]  // North Valley trail (Safe detour)
-        ];
+        if (!hasDest) {
+            const plannedCoords = [
+                [37.737, -119.573], // Curry Village
+                [37.728, -119.544], // Vernal Fall
+                [37.725, -119.533], // Nevada Fall
+                [37.7456, -119.5332] // Half Dome Cables (Danger Zone)
+            ];
 
-        // Draw routes on map
-        L.polyline(plannedCoords, {
-            color: '#EF4444',
-            weight: 3,
-            dashArray: '5, 8',
-            opacity: 0.8
-        }).addTo(map).bindTooltip("Planned Route (High Risk: Half Dome Cables)", {permanent: false, direction: 'top'});
+            const alternateCoords = [
+                [37.737, -119.573], // Curry Village
+                [37.728, -119.544], // Vernal Fall
+                [37.735, -119.525], // Detour point
+                [37.755, -119.515], // Clouds Rest trail (East of cables)
+                [37.765, -119.525]  // North Valley trail (Safe detour)
+            ];
 
-        L.polyline(alternateCoords, {
-            color: '#10B981',
-            weight: 4,
-            opacity: 0.9
-        }).addTo(map).bindTooltip("Suggested Detour Path", {permanent: false, direction: 'top'});
+            // Draw routes on map
+            L.polyline(plannedCoords, {
+                color: '#EF4444',
+                weight: 3,
+                dashArray: '5, 8',
+                opacity: 0.8
+            }).addTo(map).bindTooltip("Planned Route (High Risk: Half Dome Cables)", {permanent: false, direction: 'top'});
+
+            L.polyline(alternateCoords, {
+                color: '#10B981',
+                weight: 4,
+                opacity: 0.9
+            }).addTo(map).bindTooltip("Suggested Detour Path", {permanent: false, direction: 'top'});
+        }
 
         // Preferences / LocalStorage helper
         const getPreferencesHelper = () => {
@@ -261,19 +267,29 @@
             const rName = regionName.toLowerCase().trim();
             let latMin = null, latMax = null, lngMin = null, lngMax = null;
             
-            for (const [key, bounds] of Object.entries(REGION_BOUNDS)) {
-                if (rName.includes(key)) {
-                    latMin = bounds.lat[0];
-                    latMax = bounds.lat[1];
-                    lngMin = bounds.lng[0];
-                    lngMax = bounds.lng[1];
-                    break;
+            // Try matching destination coordinates from URL first
+            const destLat = parseFloat(urlParams.get('dest_lat'));
+            const destLng = parseFloat(urlParams.get('dest_lng'));
+            if (!isNaN(destLat) && !isNaN(destLng) && destLat !== 0.0 && destLng !== 0.0) {
+                latMin = destLat - 0.3;
+                latMax = destLat + 0.3;
+                lngMin = destLng - 0.3;
+                lngMax = destLng + 0.3;
+            } else {
+                for (const [key, bounds] of Object.entries(REGION_BOUNDS)) {
+                    if (rName.includes(key)) {
+                        latMin = bounds.lat[0];
+                        latMax = bounds.lat[1];
+                        lngMin = bounds.lng[0];
+                        lngMax = bounds.lng[1];
+                        break;
+                    }
                 }
-            }
-            
-            if (latMin === null && rName.includes("yosemite")) {
-                latMin = 37.4; latMax = 38.0;
-                lngMin = -119.7; lngMax = -119.3;
+                
+                if (latMin === null && rName.includes("yosemite")) {
+                    latMin = 37.4; latMax = 38.0;
+                    lngMin = -119.7; lngMax = -119.3;
+                }
             }
             
             const matched = [];
@@ -298,6 +314,11 @@
                 }
             });
             
+            // If target coordinate has no zones in its 0.3 degree bbox, return empty (don't display Yosemite zones elsewhere)
+            const hasDestCoords = !isNaN(destLat) && !isNaN(destLng) && destLat !== 0.0 && destLng !== 0.0;
+            if (hasDestCoords) {
+                return matched;
+            }
             return matched.length > 0 ? matched : allZones;
         }
 
@@ -508,6 +529,13 @@
                     }
                     sendPing(lat, lng);
                     checkBatteryAndRisk(lat, lng);
+                    
+                    // Update route line dynamically on fallback updates
+                    const destLat = parseFloat(urlParams.get('dest_lat'));
+                    const destLng = parseFloat(urlParams.get('dest_lng'));
+                    if (!isNaN(destLat) && !isNaN(destLng) && destLat !== 0.0 && destLng !== 0.0) {
+                        drawRoute(lat, lng, destLat, destLng, false);
+                    }
                 }, err => {
                     console.warn("Fallback geolocation error:", err);
                     if (touristMarker) {
@@ -719,7 +747,34 @@
         })();
 
         let activeTrip = null;
+        let destMarker = null;
         let lastSyncTime = null;
+
+        function updateDestinationMarkerPopup() {
+            if (!destMarker || !activeTrip) return;
+            
+            const name = activeTrip.region || "Destination";
+            const photoUrl = activeTrip.destination_photo_url;
+            
+            let popupContent = "";
+            if (photoUrl) {
+                popupContent = `
+                    <div style="text-align: center; max-width: 200px;">
+                        <img src="${photoUrl}" style="max-width: 100%; max-height: 120px; object-fit: cover; border-radius: 4px;" alt="${name}" onerror="this.parentNode.innerHTML='<div style=\'font-weight: bold;\'>${name}</div>';" />
+                        <div style="font-weight: bold; margin-top: 5px;">${name}</div>
+                    </div>
+                `;
+            } else {
+                popupContent = `<div style="text-align: center; font-weight: bold;">${name}</div>`;
+            }
+            
+            destMarker.bindPopup(popupContent);
+            
+            if (!destMarker.popupOpenedOnce) {
+                destMarker.openPopup();
+                destMarker.popupOpenedOnce = true;
+            }
+        }
 
         async function initMapData() {
             const isOnline = navigator.onLine;
@@ -732,6 +787,7 @@
                     if (tripRes.ok) {
                         activeTrip = await tripRes.json();
                         await prefHelper.set('cached_trip_details', activeTrip);
+                        updateDestinationMarkerPopup();
                     }
                 } catch (e) {
                     console.warn("Failed to fetch active trip:", e);
@@ -755,6 +811,7 @@
                     const cachedTrip = await prefHelper.get('cached_trip_details');
                     if (cachedTrip) {
                         activeTrip = JSON.parse(cachedTrip);
+                        updateDestinationMarkerPopup();
                     }
                     const cachedZones = await prefHelper.get('cached_danger_zones');
                     if (cachedZones) {
@@ -1023,9 +1080,39 @@
             }
         }
 
-        // Initialize Tourist Marker
-        if (tripId && token) {
-            touristMarker = L.marker(defaultCenter, {
+        function drawRoute(lat1, lng1, lat2, lng2, fitBounds = true) {
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+            fetch(osrmUrl)
+            .then(r => r.json())
+            .then(res => {
+                if (res.routes && res.routes.length > 0) {
+                    const geom = res.routes[0].geometry;
+                    const routeCoords = geom.coordinates.map(c => [c[1], c[0]]);
+                    
+                    if (window.activeRouteLine) {
+                        map.removeLayer(window.activeRouteLine);
+                    }
+                    
+                    window.activeRouteLine = L.polyline(routeCoords, {
+                        color: '#3b82f6',
+                        weight: 5,
+                        opacity: 0.8
+                    }).addTo(map);
+                    
+                    if (fitBounds) {
+                        const bounds = L.latLngBounds([
+                            [lat1, lng1],
+                            [lat2, lng2]
+                        ]);
+                        map.fitBounds(bounds, {padding: [50, 50]});
+                    }
+                }
+            })
+            .catch(err => console.error("OSRM routing failed:", err));
+        }
+
+        function initializeTouristMarker(lat, lng) {
+            touristMarker = L.marker([lat, lng], {
                 icon: touristIcon,
                 draggable: true
             }).addTo(map);
@@ -1037,10 +1124,66 @@
                 const position = marker.getLatLng();
                 sendPing(position.lat, position.lng);
                 checkBatteryAndRisk(position.lat, position.lng);
+                
+                // Re-draw route line dynamically on marker drag
+                const destLat = parseFloat(urlParams.get('dest_lat'));
+                const destLng = parseFloat(urlParams.get('dest_lng'));
+                if (!isNaN(destLat) && !isNaN(destLng) && destLat !== 0.0 && destLng !== 0.0) {
+                    drawRoute(position.lat, position.lng, destLat, destLng, false);
+                }
             });
+        }
 
-            // Start the background tracking service (default 5 minutes)
-            startTracking(300000);
+        // Initialize Tourist Marker
+        if (tripId && token) {
+            const dLat = parseFloat(urlParams.get('dest_lat'));
+            const dLng = parseFloat(urlParams.get('dest_lng'));
+            const hasDestCoords = !isNaN(dLat) && !isNaN(dLng) && dLat !== 0.0 && dLng !== 0.0;
+
+            if (hasDestCoords) {
+                const destIcon = L.icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41],
+                    popupAnchor: [1, -34],
+                    shadowSize: [41, 41]
+                });
+                destMarker = L.marker([dLat, dLng], {icon: destIcon}).addTo(map);
+                destMarker.bindPopup("<b>Destination</b>");
+            }
+
+            // Get user's current location via Geolocation API
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const curLat = position.coords.latitude;
+                    const curLng = position.coords.longitude;
+                    
+                    initializeTouristMarker(curLat, curLng);
+                    
+                    if (hasDestCoords) {
+                        drawRoute(curLat, curLng, dLat, dLng);
+                    } else {
+                        map.setView([curLat, curLng], 12);
+                    }
+                }, err => {
+                    console.warn("Location permission denied or error:", err);
+                    showLocationPermissionDeniedError();
+                    // Fallback to defaultCenter (Yosemite)
+                    initializeTouristMarker(defaultCenter[0], defaultCenter[1]);
+                    if (hasDestCoords) {
+                        drawRoute(defaultCenter[0], defaultCenter[1], dLat, dLng);
+                    }
+                });
+            } else {
+                initializeTouristMarker(defaultCenter[0], defaultCenter[1]);
+                if (hasDestCoords) {
+                    drawRoute(defaultCenter[0], defaultCenter[1], dLat, dLng);
+                }
+            }
+
+            // Start the background tracking service (set to 30s interval for browser updates)
+            startTracking(30000);
         } else {
             document.getElementById('tourist-status').innerHTML = '<span style="color: #ef4444">Missing parameters.</span>';
         }
