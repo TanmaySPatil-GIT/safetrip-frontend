@@ -19,5 +19,5 @@ RUN reflex init
 # Expose port (Render will configure the PORT environment variable)
 EXPOSE 10000
 
-# Start Reflex backend-only in production mode
-CMD ["sh", "-c", "reflex run --env prod --backend-only --backend-port $PORT --backend-host 0.0.0.0"]
+# Start Reflex in full production mode (serving both frontend and backend on a single port)
+CMD ["sh", "-c", "reflex run --env prod --backend-port $PORT --backend-host 0.0.0.0 --single-port"]
