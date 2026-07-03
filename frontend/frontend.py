@@ -437,8 +437,8 @@ class State(rx.State):
 
     def confirm_start_trip(self):
         print(">>> [REFLEX EVENT] confirm_start_trip called!")
-        self.start_trip()
         self.show_briefing_card = False
+        return self.start_trip()
 
     def start_trip(self):
         print(f">>> [REFLEX STATE] start_trip execution started. Region: '{self.form_region}', Token length: {len(self.tourist_token) if self.tourist_token else 0}")
