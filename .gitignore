@@ -1,0 +1,9 @@
+node_modules/
+android/app/build/
+android/.gradle/
+android/build/
+.web/
+*.apk
+*.zip
+__pycache__/
+.venv/

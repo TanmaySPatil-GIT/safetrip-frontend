@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SafeTrip</string>
+    <string name="title_activity_main">SafeTrip</string>
+    <string name="package_name">com.safetrip.app</string>
+    <string name="custom_url_scheme">com.safetrip.app</string>
+</resources>

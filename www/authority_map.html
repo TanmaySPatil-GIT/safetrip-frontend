@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SafeTrip - Authority Dispatcher Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        .control-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            width: 240px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(4px);
+        }
+        .control-panel h3 {
+            margin: 0 0 6px 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #ef4444;
+        }
+        .control-panel p {
+            margin: 0 0 8px 0;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 11px;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .leaflet-popup-content-wrapper {
+            background: #1e293b !important;
+            color: #f8fafc !important;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+        }
+        .leaflet-popup-tip {
+            background: #1e293b !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="control-panel">
+        <h3>Live Dispatch Panel</h3>
+        <p>Map shows active tourist pings and danger zones. Auto-refreshes every 5s.</p>
+        <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 8px 0;">
+        <div style="font-weight: 600; font-size: 11px; margin-bottom: 6px;">Status Legend:</div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #10B981;"></div>
+            <span>Active (Safe)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #F59E0B;"></div>
+            <span>Geofence Alert (Caution)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #EF4444;"></div>
+            <span>SOS / Distress Alert (Emergency)</span>
+        </div>
+        <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 8px 0;">
+        <div style="font-weight: 600; font-size: 11px; margin-bottom: 6px;">Heatmap Overlay:</div>
+        <div class="legend-item" style="margin-bottom: 2px;">
+            <input type="checkbox" id="heatmap-toggle" style="margin-right: 8px; cursor: pointer;">
+            <label for="heatmap-toggle" style="cursor: pointer; font-size: 11px;">Show Incident Heatmap</label>
+        </div>
+        <div class="legend-item" id="date-filter-container" style="display: none; margin-top: 6px; align-items: center;">
+            <span style="font-size: 10px; color: #94a3b8; margin-right: 6px;">Range:</span>
+            <select id="heatmap-date-filter" style="background: #0f172a; color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 4px; font-size: 11px; padding: 2px 4px; cursor: pointer;">
+                <option value="all">All Time</option>
+                <option value="30">Last 30 Days</option>
+                <option value="7">Last 7 Days</option>
+            </select>
+        </div>
+        <div id="sync-status" style="font-size: 10px; color: #64748b; margin-top: 8px; text-align: right;">Syncing...</div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // Parse parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const backend = urlParams.get('backend') || 'https://safetrip-backend-aryg.onrender.com';
+
+        const defaultCenter = [37.7456, -119.5332]; // Yosemite Valley
+
+        // Initialize Map
+        const map = L.map('map').setView(defaultCenter, 11);
+
+        // Load Dark Matter tiles
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // Icons for tourists based on alert status
+        const icons = {
+            safe: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            }),
+            geofence: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            }),
+            caution: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-gold.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            }),
+            distress: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            }),
+            sos: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            })
+        };
+
+        // Draw Danger Zones (once)
+        fetch(`${backend}/api/trips/danger-zones`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        })
+        .then(res => res.json())
+        .then(zones => {
+            zones.forEach(zone => {
+                let color = '#10B981';
+                if (zone.computed_risk_score >= 70) color = '#EF4444';
+                else if (zone.computed_risk_score >= 40) color = '#F59E0B';
+
+                L.polygon(zone.polygon_coordinates, {
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.2,
+                    weight: 2
+                }).addTo(map).bindPopup(`
+                    <div style="font-weight: bold; font-size:13px;">${zone.name}</div>
+                    <div style="font-size:11px; margin-top:4px;">
+                        Risk Score: <b>${zone.computed_risk_score} / 100</b>
+                    </div>
+                `);
+            });
+        })
+        .catch(err => console.error("Error loading danger zones in authority map:", err));
+
+        // Group containing all tourist markers
+        const touristsGroup = L.layerGroup().addTo(map);
+        let markersMap = {}; // trip_id -> marker
+
+        // Poll Tourist Locations
+        function refreshTouristLocations() {
+            if (!token) {
+                document.getElementById('sync-status').innerText = 'Auth Error';
+                return;
+            }
+
+            fetch(`${backend}/api/trips/authority/active-trips`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(trips => {
+                const currentTripIds = new Set();
+                
+                trips.forEach(trip => {
+                    if (trip.latest_lat === null || trip.latest_lng === null) return;
+                    
+                    currentTripIds.add(trip.trip_id);
+                    const pos = [trip.latest_lat, trip.latest_lng];
+                    const status = trip.alert_status || 'safe';
+                    const icon = icons[status] || icons.safe;
+
+                    let popupContent = `
+                        <div style="font-family: sans-serif; font-size: 12px; width: 180px;">
+                            <div style="font-weight: bold; border-bottom: 1px solid #475569; padding-bottom: 4px; margin-bottom: 6px; font-size: 13px;">
+                                Trip #${trip.trip_id}
+                            </div>
+                            <b>Phone:</b> ${trip.phone_number}<br/>
+                            <b>Region:</b> ${trip.region}<br/>
+                            <b>Alert Status:</b> <span style="font-weight: bold; color: ${status === 'safe' ? '#10B981' : (status === 'geofence' ? '#F59E0B' : '#EF4444')}">${status.toUpperCase()}</span><br/>
+                            <b>Last Ping:</b> ${new Date(trip.latest_timestamp).toLocaleTimeString()}<br/>
+                            <b>Coords:</b> ${trip.latest_lat.toFixed(4)}, ${trip.latest_lng.toFixed(4)}
+                        </div>
+                    `;
+
+                    if (markersMap[trip.trip_id]) {
+                        // Update existing marker
+                        markersMap[trip.trip_id].setLatLng(pos);
+                        markersMap[trip.trip_id].setIcon(icon);
+                        markersMap[trip.trip_id].setPopupContent(popupContent);
+                    } else {
+                        // Create new marker
+                        const marker = L.marker(pos, { icon: icon }).addTo(touristsGroup);
+                        marker.bindPopup(popupContent);
+                        markersMap[trip.trip_id] = marker;
+                    }
+                });
+
+                // Clean up ended trips
+                for (const tripId in markersMap) {
+                    if (!currentTripIds.has(parseInt(tripId))) {
+                        touristsGroup.removeLayer(markersMap[tripId]);
+                        delete markersMap[tripId];
+                    }
+                }
+
+                document.getElementById('sync-status').innerText = `Refreshed ${new Date().toLocaleTimeString()}`;
+            })
+            .catch(err => {
+                document.getElementById('sync-status').innerText = 'Sync failed';
+                console.error("Error fetching active tourist locations:", err);
+            });
+        }
+
+        // Heatmap State
+        let heatmapLayer = null;
+        let allAlerts = [];
+
+        function updateHeatmap() {
+            if (heatmapLayer) {
+                map.removeLayer(heatmapLayer);
+                heatmapLayer = null;
+            }
+
+            const toggle = document.getElementById('heatmap-toggle');
+            const filterContainer = document.getElementById('date-filter-container');
+            
+            if (!toggle.checked) {
+                filterContainer.style.display = 'none';
+                return;
+            }
+            
+            filterContainer.style.display = 'flex';
+
+            const filterValue = document.getElementById('heatmap-date-filter').value;
+            const now = new Date();
+            let minDate = null;
+            if (filterValue === '7') {
+                minDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            } else if (filterValue === '30') {
+                minDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            }
+
+            const points = [];
+            allAlerts.forEach(alert => {
+                const alertDate = new Date(alert.timestamp);
+                if (minDate && alertDate < minDate) {
+                    return;
+                }
+
+                let weight = 1;
+                const type = (alert.type || '').toLowerCase();
+                if (type === 'sos') {
+                    weight = 3;
+                } else if (type.includes('distress')) {
+                    weight = 2;
+                } else if (type === 'geofence') {
+                    weight = 1;
+                }
+
+                points.push([alert.lat, alert.lng, weight]);
+            });
+
+            if (points.length > 0) {
+                heatmapLayer = L.heatLayer(points, {
+                    radius: 25,
+                    blur: 15,
+                    maxZoom: 13,
+                    max: 3
+                }).addTo(map);
+            }
+        }
+
+        function refreshAlerts() {
+            if (!token) return;
+            fetch(`${backend}/api/trips/authority/alerts`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(alerts => {
+                allAlerts = alerts;
+                updateHeatmap();
+            })
+            .catch(err => {
+                console.error("Error fetching historical alerts:", err);
+            });
+        }
+
+        document.getElementById('heatmap-toggle').addEventListener('change', updateHeatmap);
+        document.getElementById('heatmap-date-filter').addEventListener('change', updateHeatmap);
+
+        // Poll every 5 seconds
+        if (token) {
+            refreshTouristLocations();
+            setInterval(refreshTouristLocations, 5000);
+
+            refreshAlerts();
+            setInterval(refreshAlerts, 5000);
+        } else {
+            document.getElementById('sync-status').innerText = 'Missing Token';
+        }
+    </script>
+</body>
+</html>

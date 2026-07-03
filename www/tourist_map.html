@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SafeTrip - Tourist Live Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #1a1a24;
+            color: #e2e8f0;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(30, 30, 40, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            max-width: 320px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(4px);
+        }
+        .info-panel h3 {
+            margin: 0 0 6px 0;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #3b82f6;
+        }
+        .info-panel p {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            color: #94a3b8;
+            line-height: 1.4;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #475569;
+            color: #f8fafc;
+            margin-top: 4px;
+        }
+        .status-success {
+            background: #059669;
+        }
+        .status-warning {
+            background: #d97706;
+        }
+        .status-danger {
+            background: #dc2626;
+        }
+        .route-legend {
+            margin-top: 8px;
+            font-size: 10px;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .route-legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .route-color-line {
+            width: 30px;
+            height: 4px;
+            margin-right: 8px;
+            border-radius: 2px;
+        }
+        /* Custom map popups style */
+        .leaflet-popup-content-wrapper {
+            background: #1e1e28 !important;
+            color: #f8fafc !important;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            width: 250px;
+        }
+        .leaflet-popup-tip {
+            background: #1e1e28 !important;
+        }
+        .popup-title {
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 4px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 4px;
+        }
+        .popup-score {
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        .factor-list {
+            margin: 4px 0 0 0;
+            padding-left: 16px;
+            font-size: 11px;
+            color: #cbd5e1;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="offline-banner" style="display:none; position: absolute; top: 0; left: 0; right: 0; z-index: 9999; background: #dc2626; color: white; text-align: center; padding: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">
+        ⚠️ Offline Mode — SOS will be sent via SMS
+        <div id="last-synced-time" style="font-size: 11px; font-weight: normal; margin-top: 2px;">Last synced: Just now</div>
+    </div>
+
+    <div id="online-banner" style="display:none; position: absolute; top: 0; left: 0; right: 0; z-index: 9999; background: #10b981; color: white; text-align: center; padding: 10px; font-weight: bold; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.5);">
+        ✅ Back online — synced 0 pending pings
+    </div>
+
+    <div class="info-panel">
+        <h3>SafeTrip Live Monitor</h3>
+        <p>Current location is shown as the blue pin. <b>Drag the pin</b> to simulate movement & trigger geofences.</p>
+        <div id="tourist-status">Initializing map...</div>
+        <div id="alert-indicator" class="status-badge">No Alerts Active</div>
+        <div id="tracking-mode" style="font-size: 11px; font-weight: bold; margin-top: 6px; color: #60a5fa;">📍 Tracking: Normal (5 min)</div>
+        <div id="battery-warning" style="display:none; font-size: 11px; font-weight: bold; margin-top: 6px; padding: 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.2); color: #f59e0b;"></div>
+        
+        <div class="route-legend">
+            <div style="font-weight:600; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.02em; color:#94a3b8;">Path Monitoring:</div>
+            <div class="route-legend-item">
+                <div class="route-color-line" style="background:#EF4444; border-top:2px dashed #EF4444; height:0;"></div>
+                <span>Planned Route (Blocked by Danger Zone)</span>
+            </div>
+            <div class="route-legend-item">
+                <div class="route-color-line" style="background:#10B981;"></div>
+                <span>Suggested Safe Detour</span>
+            </div>
+        </div>
+
+        <div id="location-error-banner" style="display:none; background:#7f1d1d; border:1px solid #dc2626; padding:10px; border-radius:6px; margin-top:10px; font-size:11px; color:#fecaca; line-height:1.4;">
+            ⚠️ <b>Location Access Disabled</b><br/>
+            SafeTrip cannot monitor danger zones or trigger safety alerts automatically because location permissions are disabled. Please drag the blue pin on the map to your current location and check-in manually.<br/>
+            <button onclick="manualCheckIn()" style="margin-top:8px; background:#dc2626; color:white; border:0; padding:6px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:10px; width:100%;">
+                📍 Send Manual Check-In Ping
+            </button>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        // Parse URL query parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const tripId = urlParams.get('trip_id');
+        const backend = urlParams.get('backend') || 'https://safetrip-backend-aryg.onrender.com';
+
+        const defaultCenter = [37.7456, -119.5332]; // Yosemite Valley
+
+        // Initialize Map
+        const map = L.map('map').setView(defaultCenter, 12);
+
+        // Load Dark Matter tiles
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // Define icons
+        const touristIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [1, -34],
+            shadowSize: [41, 41]
+        });
+
+        let touristMarker = null;
+
+        // Draw Yosemite Routes (Planned blocked vs Alternate safe)
+        const plannedCoords = [
+            [37.737, -119.573], // Curry Village
+            [37.728, -119.544], // Vernal Fall
+            [37.725, -119.533], // Nevada Fall
+            [37.7456, -119.5332] // Half Dome Cables (Danger Zone)
+        ];
+
+        const alternateCoords = [
+            [37.737, -119.573], // Curry Village
+            [37.728, -119.544], // Vernal Fall
+            [37.735, -119.525], // Detour point
+            [37.755, -119.515], // Clouds Rest trail (East of cables)
+            [37.765, -119.525]  // North Valley trail (Safe detour)
+        ];
+
+        // Draw routes on map
+        L.polyline(plannedCoords, {
+            color: '#EF4444',
+            weight: 3,
+            dashArray: '5, 8',
+            opacity: 0.8
+        }).addTo(map).bindTooltip("Planned Route (High Risk: Half Dome Cables)", {permanent: false, direction: 'top'});
+
+        L.polyline(alternateCoords, {
+            color: '#10B981',
+            weight: 4,
+            opacity: 0.9
+        }).addTo(map).bindTooltip("Suggested Detour Path", {permanent: false, direction: 'top'});
+
+        // Preferences / LocalStorage helper
+        const getPreferencesHelper = () => {
+            const cap = window.parent.Capacitor || window.Capacitor;
+            if (cap && cap.Plugins && cap.Plugins.Preferences) {
+                const Prefs = cap.Plugins.Preferences;
+                return {
+                    set: async (key, value) => {
+                        await Prefs.set({ key, value: typeof value === 'string' ? value : JSON.stringify(value) });
+                    },
+                    get: async (key) => {
+                        const res = await Prefs.get({ key });
+                        return res.value;
+                    },
+                    remove: async (key) => {
+                        await Prefs.remove({ key });
+                    }
+                };
+            } else {
+                return {
+                    set: async (key, value) => {
+                        localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+                    },
+                    get: async (key) => {
+                        return localStorage.getItem(key);
+                    },
+                    remove: async (key) => {
+                        localStorage.removeItem(key);
+                    }
+                };
+            }
+        };
+        const prefHelper = getPreferencesHelper();
+
+        const REGION_BOUNDS = {
+            "yosemite valley": { lat: [37.70, 37.78], lng: [-119.65, -119.50] },
+            "yosemite national park": { lat: [37.4, 38.0], lng: [-119.7, -119.3] },
+            "yosemite": { lat: [37.4, 38.0], lng: [-119.7, -119.3] }
+        };
+
+        function getMatchedZones(allZones, regionName) {
+            if (!regionName) return allZones;
+            const rName = regionName.toLowerCase().trim();
+            let latMin = null, latMax = null, lngMin = null, lngMax = null;
+            
+            for (const [key, bounds] of Object.entries(REGION_BOUNDS)) {
+                if (rName.includes(key)) {
+                    latMin = bounds.lat[0];
+                    latMax = bounds.lat[1];
+                    lngMin = bounds.lng[0];
+                    lngMax = bounds.lng[1];
+                    break;
+                }
+            }
+            
+            if (latMin === null && rName.includes("yosemite")) {
+                latMin = 37.4; latMax = 38.0;
+                lngMin = -119.7; lngMax = -119.3;
+            }
+            
+            const matched = [];
+            allZones.forEach(zone => {
+                if (latMin !== null && latMax !== null) {
+                    let inBbox = false;
+                    for (const pt of zone.polygon_coordinates) {
+                        if (pt[0] >= latMin && pt[0] <= latMax && pt[1] >= lngMin && pt[1] <= lngMax) {
+                            inBbox = true;
+                            break;
+                        }
+                    }
+                    if (inBbox) {
+                        matched.push(zone);
+                    }
+                } else {
+                    const words = rName.split(/\s+/).filter(w => w.length > 3);
+                    const matchesWord = words.some(w => zone.name.toLowerCase().includes(w));
+                    if (matchesWord) {
+                        matched.push(zone);
+                    }
+                }
+            });
+            
+            return matched.length > 0 ? matched : allZones;
+        }
+
+        // Renders danger zones
+        function renderDangerZones(zones) {
+            zones.forEach(zone => {
+                let color = '#10B981';
+                if (zone.computed_risk_score >= 70) {
+                    color = '#EF4444';
+                } else if (zone.computed_risk_score >= 40) {
+                    color = '#F59E0B';
+                }
+
+                const polygon = L.polygon(zone.polygon_coordinates, {
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.3,
+                    weight: 2
+                }).addTo(map);
+
+                polygon.bindPopup(() => getDangerZonePopupHtml(zone), {
+                    maxWidth: 250,
+                    className: 'dark-popup'
+                });
+
+                polygon.on('popupopen', () => {
+                    const container = document.getElementById(`photos-container-${zone.id}`);
+                    if (container) {
+                        fetch(`${backend}/api/trips/danger-zones/${zone.id}/photos`)
+                            .then(res => res.json())
+                            .then(photos => {
+                                if (photos.length === 0) {
+                                    container.innerHTML = `<div style="font-size:10px; color:#64748b;">${mapTranslations[currentLanguage].no_photos}</div>`;
+                                    return;
+                                }
+                                let galleryHtml = '<div style="display:flex; gap:4px; overflow-x:auto; padding-bottom:4px;">';
+                                photos.forEach(p => {
+                                    galleryHtml += `<img src="${backend}${p.photo_url}" style="width:50px; height:50px; object-fit:cover; border-radius:4px; cursor:pointer;" onclick="window.open('${backend}${p.photo_url}')" />`;
+                                });
+                                galleryHtml += '</div>';
+                                container.innerHTML = galleryHtml;
+                            })
+                            .catch(err => {
+                                container.innerHTML = '<div style="font-size:10px; color:#ef4444;">Failed to load photos.</div>';
+                            });
+                    }
+                });
+            });
+        }
+
+        // Helper function for checking if a coordinate is inside a polygon
+        function isPointInPolygon(point, vs) {
+            const x = point[0], y = point[1];
+            let inside = false;
+            for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+                const xi = vs[i][0], yi = vs[i][1];
+                const xj = vs[j][0], yj = vs[j][1];
+                const intersect = ((yi > y) !== (yj > y))
+                    && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        async function checkCurrentRiskLevel(lat, lng) {
+            try {
+                const zonesStr = await prefHelper.get('cached_danger_zones');
+                const zones = JSON.parse(zonesStr || '[]');
+                let maxRiskScore = 0;
+                for (const zone of zones) {
+                    if (isPointInPolygon([lat, lng], zone.polygon_coordinates)) {
+                        if (zone.computed_risk_score > maxRiskScore) {
+                            maxRiskScore = zone.computed_risk_score;
+                        }
+                    }
+                }
+                return maxRiskScore;
+            } catch (e) {
+                console.warn("Failed checking risk level client-side:", e);
+                return 0;
+            }
+        }
+
+        window.mockBatteryLevel = null;
+        let currentWatcherId = null;
+        let currentInterval = 300000; // default 5 mins
+        let trackingActive = true;
+
+        async function checkBatteryAndRisk(lat, lng) {
+            let batteryLevel = 1.0;
+            const cap = window.parent.Capacitor || window.Capacitor;
+            
+            try {
+                if (window.mockBatteryLevel !== null) {
+                    batteryLevel = window.mockBatteryLevel;
+                } else if (cap && cap.Plugins && cap.Plugins.Device) {
+                    const info = await cap.Plugins.Device.getBatteryInfo();
+                    batteryLevel = info.batteryLevel;
+                } else if (navigator.getBattery) {
+                    const battery = await navigator.getBattery();
+                    batteryLevel = battery.level;
+                }
+            } catch (e) {
+                console.warn("Failed to get battery info:", e);
+            }
+
+            const batteryPercent = Math.round(batteryLevel * 100);
+            const batteryWarnDiv = document.getElementById('battery-warning');
+
+            if (batteryPercent < 10) {
+                pauseTracking();
+                batteryWarnDiv.innerText = "🔋 Critical Battery — Location paused. SOS SMS still available.";
+                batteryWarnDiv.style.display = 'block';
+                batteryWarnDiv.style.background = 'rgba(239, 68, 68, 0.2)';
+                batteryWarnDiv.style.color = '#ef4444';
+                return;
+            } else if (batteryPercent < 20) {
+                batteryWarnDiv.innerText = "🔋 Low Battery — Tracking reduced to save power. SOS still active.";
+                batteryWarnDiv.style.display = 'block';
+                batteryWarnDiv.style.background = 'rgba(245, 158, 11, 0.2)';
+                batteryWarnDiv.style.color = '#f59e0b';
+                
+                if (currentInterval !== 600000 || !trackingActive) {
+                    resumeTracking(600000);
+                }
+                return;
+            } else {
+                batteryWarnDiv.style.display = 'none';
+            }
+
+            const currentRisk = await checkCurrentRiskLevel(lat, lng);
+            let targetInterval = 300000; // Normal: 5 min
+            
+            if (currentRisk > 60) {
+                targetInterval = 60000; // High Alert: 1 min
+            }
+
+            if (currentInterval !== targetInterval || !trackingActive) {
+                resumeTracking(targetInterval);
+            }
+        }
+
+        async function startTracking(intervalMs) {
+            currentInterval = intervalMs;
+            if (!trackingActive) return;
+
+            console.log(`Starting background tracking: interval=${intervalMs}ms`);
+            
+            const modeText = intervalMs === 60000 ? "High Alert (1 min)" : 
+                             (intervalMs === 600000 ? "Battery Saver (10 min)" : "Normal (5 min)");
+            document.getElementById('tracking-mode').innerText = `📍 Tracking: ${modeText}`;
+
+            stopTrackingOnly();
+
+            const cap = window.parent.Capacitor || window.Capacitor;
+            if (cap && cap.Plugins && cap.Plugins.BackgroundGeolocation) {
+                const Background = cap.Plugins.BackgroundGeolocation;
+                try {
+                    const watcherId = await Background.addWatcher({
+                        backgroundTitle: "SafeTrip Active",
+                        backgroundMessage: "Your trip is being monitored for safety.",
+                        requestPermissions: true,
+                        stale: false,
+                        distanceFilter: 50,
+                        interval: intervalMs,
+                        fastestInterval: Math.min(intervalMs, 60000)
+                    }, function(location, error) {
+                        if (error) {
+                            console.error("Background geolocation error:", error);
+                            return;
+                        }
+                        if (location) {
+                            const lat = location.latitude;
+                            const lng = location.longitude;
+                            if (touristMarker) {
+                                touristMarker.setLatLng([lat, lng]);
+                            }
+                            sendPing(lat, lng);
+                            checkBatteryAndRisk(lat, lng);
+                        }
+                    });
+                    currentWatcherId = watcherId;
+                } catch (e) {
+                    console.warn("Failed native background geolocation, fallback to timer:", e);
+                    startTimerFallback(intervalMs);
+                }
+            } else {
+                startTimerFallback(intervalMs);
+            }
+        }
+
+        let fallbackIntervalId = null;
+        function startTimerFallback(intervalMs) {
+            triggerFallbackPosition();
+            fallbackIntervalId = setInterval(() => {
+                triggerFallbackPosition();
+            }, intervalMs);
+        }
+
+        function triggerFallbackPosition() {
+            if (!trackingActive) return;
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    if (touristMarker) {
+                        touristMarker.setLatLng([lat, lng]);
+                    }
+                    sendPing(lat, lng);
+                    checkBatteryAndRisk(lat, lng);
+                }, err => {
+                    console.warn("Fallback geolocation error:", err);
+                    if (touristMarker) {
+                        const pos = touristMarker.getLatLng();
+                        sendPing(pos.lat, pos.lng);
+                        checkBatteryAndRisk(pos.lat, pos.lng);
+                    }
+                });
+            } else if (touristMarker) {
+                const pos = touristMarker.getLatLng();
+                sendPing(pos.lat, pos.lng);
+                checkBatteryAndRisk(pos.lat, pos.lng);
+            }
+        }
+
+        function stopTrackingOnly() {
+            const cap = window.parent.Capacitor || window.Capacitor;
+            if (currentWatcherId && cap && cap.Plugins && cap.Plugins.BackgroundGeolocation) {
+                try {
+                    cap.Plugins.BackgroundGeolocation.removeWatcher({ id: currentWatcherId });
+                } catch(e){}
+                currentWatcherId = null;
+            }
+            if (fallbackIntervalId) {
+                clearInterval(fallbackIntervalId);
+                fallbackIntervalId = null;
+            }
+        }
+
+        function pauseTracking() {
+            trackingActive = false;
+            stopTrackingOnly();
+            document.getElementById('tracking-mode').innerText = "📍 Tracking: Paused";
+        }
+
+        function resumeTracking(intervalMs) {
+            trackingActive = true;
+            startTracking(intervalMs || currentInterval);
+        }
+
+        // Periodic battery check
+        setInterval(() => {
+            if (touristMarker) {
+                const pos = touristMarker.getLatLng();
+                checkBatteryAndRisk(pos.lat, pos.lng);
+            }
+        }, 15000);
+
+        let currentLanguage = 'en';
+
+        const mapTranslations = {
+            "en": {
+                "offline_mode_banner": "⚠️ Offline Mode — SOS will be sent via SMS",
+                "back_online_banner": "✅ Back online — synced {count} pending pings",
+                "tracking_label": "📍 Tracking: ",
+                "normal_mode": "Normal (5 min)",
+                "high_alert_mode": "High Alert (1 min)",
+                "battery_saver_mode": "Battery Saver (10 min)",
+                "low_battery_warn": "🔋 Low Battery — Tracking reduced to save power. SOS still active.",
+                "critical_battery_warn": "🔋 Critical Battery — Location paused. SOS SMS still available.",
+                "safe_zone": "Safe (Low)",
+                "caution_zone": "Caution (Medium)",
+                "danger_zone": "Danger (High)",
+                "risk_level_label": "Risk Level: ",
+                "risk_score_label": "Risk Score: ",
+                "factors_label": "Factors:",
+                "zone_photos_label": "Zone Photos:",
+                "no_photos": "No photos uploaded yet.",
+                "upload_photo_btn": "📷 Upload Live Photo",
+                "loading_photos": "Loading photos..."
+            },
+            "hi": {
+                "offline_mode_banner": "⚠️ ऑफलाइन मोड — SOS SMS द्वारा भेजा जाएगा",
+                "back_online_banner": "✅ बैक ऑनलाइन — {count} लंबित पिंग्स सिंक किए गए",
+                "tracking_label": "📍 ट्रैकिंग: ",
+                "normal_mode": "सामान्य (5 मिनट)",
+                "high_alert_mode": "हाई अलर्ट (1 मिनट)",
+                "battery_saver_mode": "बैटरी सेवर (10 मिनट)",
+                "low_battery_warn": "🔋 बैटरी कम — बिजली बचाने के लिए ट्रैकिंग कम की गई।",
+                "critical_battery_warn": "🔋 गंभीर बैटरी — स्थान रोका गया। SOS SMS अभी भी उपलब्ध है।",
+                "safe_zone": "सुरक्षित (कम)",
+                "caution_zone": "सावधानी (मध्यम)",
+                "danger_zone": "खतरा (उच्च)",
+                "risk_level_label": "जोखिम स्तर: ",
+                "risk_score_label": "जोखिम स्कोर: ",
+                "factors_label": "कारक:",
+                "zone_photos_label": "क्षेत्र तस्वीरें:",
+                "no_photos": "अभी तक कोई फ़ोटो अपलोड नहीं की गई है।",
+                "upload_photo_btn": "📷 लाइव फोटो अपलोड करें",
+                "loading_photos": "तस्वीरें लोड हो रही हैं..."
+            },
+            "mr": {
+                "offline_mode_banner": "⚠️ ऑफलाइन मोड — SOS SMS द्वारे पाठवला जाईल",
+                "back_online_banner": "✅ बॅक ऑनलाइन — {count} प्रलंबित पिंग्स समक्रमित केले",
+                "tracking_label": "📍 ट्रॅकिंग: ",
+                "normal_mode": "सामान्य (5 मिनिटे)",
+                "high_alert_mode": "हाई अलर्ट (1 मिनिट)",
+                "battery_saver_mode": "बॅटरी सेव्हर (10 मिनिटे)",
+                "low_battery_warn": "🔋 बॅटरी कमी — वीज वाचवण्यासाठी ट्रॅकिंग कमी केली.",
+                "critical_battery_warn": "🔋 गंभीर बॅटरी — स्थान थांबवले. SOS SMS अद्याप उपलब्ध आहे.",
+                "safe_zone": "सुरक्षित (कमी)",
+                "caution_zone": "सावधगिरी (मध्यम)",
+                "danger_zone": "धोका (उच्च)",
+                "risk_level_label": "जोखीम पातळी: ",
+                "risk_score_label": "जोखीम धावसंख्या: ",
+                "factors_label": "घटक:",
+                "zone_photos_label": "क्षेत्रातील फोटो:",
+                "no_photos": "अद्याप एकही फोटो अपलोड केलेला नाही.",
+                "upload_photo_btn": "📷 लाइव्ह फोटो अपलोड करा",
+                "loading_photos": "फोटो लोड होत आहेत..."
+            }
+        };
+
+        function setMapLanguage(lang) {
+            if (!mapTranslations[lang]) lang = 'en';
+            currentLanguage = lang;
+            
+            // Update banners
+            const offlineBanner = document.getElementById('offline-banner');
+            if (offlineBanner && offlineBanner.childNodes[0]) {
+                offlineBanner.childNodes[0].nodeValue = mapTranslations[currentLanguage].offline_mode_banner + "\n";
+            }
+            
+            // Re-render tracking mode
+            const modeText = currentInterval === 60000 ? mapTranslations[currentLanguage].high_alert_mode : 
+                             (currentInterval === 600000 ? mapTranslations[currentLanguage].battery_saver_mode : 
+                              mapTranslations[currentLanguage].normal_mode);
+            const modeDiv = document.getElementById('tracking-mode');
+            if (modeDiv) {
+                modeDiv.innerText = mapTranslations[currentLanguage].tracking_label + modeText;
+            }
+            
+            // Re-render battery warning text if active
+            const batteryWarnDiv = document.getElementById('battery-warning');
+            if (batteryWarnDiv && batteryWarnDiv.style.display !== 'none') {
+                let batteryLevel = 1.0;
+                if (window.mockBatteryLevel !== null) {
+                    batteryLevel = window.mockBatteryLevel;
+                }
+                const batteryPercent = Math.round(batteryLevel * 100);
+                if (batteryPercent < 10) {
+                    batteryWarnDiv.innerText = mapTranslations[currentLanguage].critical_battery_warn;
+                } else if (batteryPercent < 20) {
+                    batteryWarnDiv.innerText = mapTranslations[currentLanguage].low_battery_warn;
+                }
+            }
+        }
+
+        function getDangerZonePopupHtml(zone) {
+            let color = '#10B981';
+            let riskText = mapTranslations[currentLanguage].safe_zone;
+            if (zone.computed_risk_score >= 70) {
+                color = '#EF4444';
+                riskText = mapTranslations[currentLanguage].danger_zone;
+            } else if (zone.computed_risk_score >= 40) {
+                color = '#F59E0B';
+                riskText = mapTranslations[currentLanguage].caution_zone;
+            }
+
+            let factorsHtml = '<ul class="factor-list">';
+            if (zone.risk_factors) {
+                zone.risk_factors.forEach(f => {
+                    let name = f.factor_type;
+                    if (name === 'forest_density') name = 'Forest Density';
+                    else if (name === 'rainfall') name = 'Live Rainfall';
+                    else if (name === 'network_coverage') name = 'Signal Coverage';
+                    else if (name === 'slope') name = 'Slope/Terrain';
+                    factorsHtml += `<li><b>${name}</b>: ${f.value}/10</li>`;
+                });
+            }
+            factorsHtml += '</ul>';
+
+            return `
+                <div class="popup-title">${zone.name}</div>
+                <div class="popup-score">
+                    <b>${mapTranslations[currentLanguage].risk_level_label}</b> <span style="color: ${color}">${riskText}</span><br/>
+                    <b>${mapTranslations[currentLanguage].risk_score_label}</b> <b>${zone.computed_risk_score} / 100</b>
+                </div>
+                <div style="font-size: 11px; font-weight: bold; margin-top: 4px;">${mapTranslations[currentLanguage].factors_label}</div>
+                ${factorsHtml}
+                
+                <div style="font-size: 11px; font-weight: bold; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 6px;">${mapTranslations[currentLanguage].zone_photos_label}</div>
+                <div id="photos-container-${zone.id}" style="min-height: 50px;">${mapTranslations[currentLanguage].loading_photos}</div>
+                
+                <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.1); padding-top:6px;">
+                    <input type="file" id="photo-upload-input-${zone.id}" accept="image/*" style="display:none;" onchange="handleFileSelected(event, ${zone.id})"/>
+                    <button onclick="triggerPhotoCapture(${zone.id})" style="background:#3b82f6; border:0; color:white; padding:5px 8px; border-radius:4px; font-size:10px; width:100%; cursor:pointer; font-weight:600;">${mapTranslations[currentLanguage].upload_photo_btn}</button>
+                    <div id="upload-status-${zone.id}" style="font-size:9px; color:#94a3b8; margin-top:4px; text-align:center;"></div>
+                </div>
+            `;
+        }
+
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'set_language') {
+                setMapLanguage(event.data.language);
+            }
+        });
+
+        // Initialize saved language if exists
+        (async () => {
+            try {
+                const savedLang = await prefHelper.get('preferred_language');
+                if (savedLang) {
+                    setMapLanguage(savedLang);
+                }
+            } catch (e) {
+                console.warn("Failed loading saved language inside iframe:", e);
+            }
+        })();
+
+        let activeTrip = null;
+        let lastSyncTime = null;
+
+        async function initMapData() {
+            const isOnline = navigator.onLine;
+            
+            if (isOnline && token) {
+                try {
+                    const tripRes = await fetch(`${backend}/api/trips/active`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+                    if (tripRes.ok) {
+                        activeTrip = await tripRes.json();
+                        await prefHelper.set('cached_trip_details', activeTrip);
+                    }
+                } catch (e) {
+                    console.warn("Failed to fetch active trip:", e);
+                }
+
+                try {
+                    const zonesRes = await fetch(`${backend}/api/trips/danger-zones`);
+                    if (zonesRes.ok) {
+                        const allZones = await zonesRes.json();
+                        const matchedZones = getMatchedZones(allZones, activeTrip ? activeTrip.region : '');
+                        await prefHelper.set('cached_danger_zones', matchedZones);
+                        renderDangerZones(matchedZones);
+                    }
+                } catch (e) {
+                    console.warn("Failed to fetch danger zones:", e);
+                }
+                
+                hideOfflineBanner();
+            } else {
+                try {
+                    const cachedTrip = await prefHelper.get('cached_trip_details');
+                    if (cachedTrip) {
+                        activeTrip = JSON.parse(cachedTrip);
+                    }
+                    const cachedZones = await prefHelper.get('cached_danger_zones');
+                    if (cachedZones) {
+                        renderDangerZones(JSON.parse(cachedZones));
+                    }
+                    const cachedCoords = await prefHelper.get('cached_gps_coordinates');
+                    if (cachedCoords) {
+                        const list = JSON.parse(cachedCoords);
+                        if (list.length > 0) {
+                            const lastCoord = list[list.length - 1];
+                            map.setView([lastCoord.lat, lastCoord.lng], 13);
+                            if (touristMarker) {
+                                touristMarker.setLatLng([lastCoord.lat, lastCoord.lng]);
+                            }
+                            lastSyncTime = lastCoord.timestamp;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Failed to load cached offline data:", e);
+                }
+                
+                showOfflineBanner();
+            }
+        }
+
+        function updateLastSyncedTime() {
+            if (!lastSyncTime) {
+                document.getElementById('last-synced-time').innerText = "Last synced: Never";
+                return;
+            }
+            const diff = Math.floor((new Date() - new Date(lastSyncTime)) / 60000);
+            if (diff <= 0) {
+                document.getElementById('last-synced-time').innerText = "Last synced: Just now";
+            } else {
+                document.getElementById('last-synced-time').innerText = `Last synced: ${diff} minute${diff > 1 ? 's' : ''} ago`;
+            }
+        }
+
+        let syncTimer = null;
+        function showOfflineBanner() {
+            document.getElementById('offline-banner').style.display = 'block';
+            document.getElementById('online-banner').style.display = 'none';
+            document.querySelector('.info-panel').style.top = '60px';
+            updateLastSyncedTime();
+            if (!syncTimer) {
+                syncTimer = setInterval(updateLastSyncedTime, 60000);
+            }
+        }
+
+        function hideOfflineBanner() {
+            document.getElementById('offline-banner').style.display = 'none';
+            document.querySelector('.info-panel').style.top = '10px';
+            if (syncTimer) {
+                clearInterval(syncTimer);
+                syncTimer = null;
+            }
+        }
+
+        async function syncQueuedPings() {
+            const isOnline = navigator.onLine;
+            if (!isOnline || !token) return;
+            
+            try {
+                const queueStr = await prefHelper.get('queued_pings');
+                const queue = JSON.parse(queueStr || '[]');
+                if (queue.length === 0) {
+                    hideOfflineBanner();
+                    return;
+                }
+                
+                console.log(`Syncing ${queue.length} queued pings...`);
+                let syncedCount = 0;
+                for (const ping of queue) {
+                    const res = await fetch(`${backend}/api/trips/${tripId}/ping`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ lat: ping.lat, lng: ping.lng })
+                    });
+                    if (res.ok) {
+                        syncedCount++;
+                    }
+                }
+                
+                await prefHelper.set('queued_pings', []);
+                
+                const onlineBanner = document.getElementById('online-banner');
+                onlineBanner.innerText = `✅ Back online — synced ${syncedCount} pending pings`;
+                onlineBanner.style.display = 'block';
+                document.getElementById('offline-banner').style.display = 'none';
+                document.querySelector('.info-panel').style.top = '60px';
+                
+                setTimeout(() => {
+                    onlineBanner.style.display = 'none';
+                    document.querySelector('.info-panel').style.top = '10px';
+                }, 6000);
+                
+                await initMapData();
+                
+            } catch (e) {
+                console.warn("Failed to sync queued pings:", e);
+            }
+        }
+
+        window.addEventListener('online', () => {
+            syncQueuedPings();
+        });
+        window.addEventListener('offline', () => {
+            showOfflineBanner();
+        });
+
+        // Load Photos for a specific zone
+        function loadZonePhotos(zoneId) {
+            const container = document.getElementById(`photos-container-${zoneId}`);
+            if (!container) return;
+
+            fetch(`${backend}/api/trips/danger-zones/${zoneId}/photos`)
+                .then(res => res.json())
+                .then(photos => {
+                    if (photos.length > 0) {
+                        let html = '<div style="display:flex; gap:6px; overflow-x:auto; padding:4px 0; margin-top:4px; max-width:230px;">';
+                        photos.forEach(p => {
+                            html += `<img src="${backend}${p.photo_url}" style="width:70px; height:50px; object-fit:cover; border-radius:4px; border:1px solid rgba(255,255,255,0.15); cursor:pointer;" onclick="window.open('${backend}${p.photo_url}')" title="Click to expand"/>`;
+                        });
+                        html += '</div>';
+                        container.innerHTML = html;
+                    } else {
+                        container.innerHTML = `
+                            <p style="font-size:11px; color:#94a3b8; margin:6px 0 6px 0; font-style:italic;">No photos yet. Be the first to upload one.</p>
+                        `;
+                    }
+                })
+                .catch(err => {
+                    container.innerHTML = '<span style="color:#ef4444; font-size:10px;">Failed to load photos</span>';
+                });
+        }
+
+        // Handle Image File Upload directly to backend
+        function handleFileSelected(event, zoneId) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const statusDiv = document.getElementById(`upload-status-${zoneId}`);
+            statusDiv.innerText = "Uploading...";
+            statusDiv.style.color = "#94a3b8";
+
+            const formData = new FormData();
+            formData.append("file", file);
+            
+            // Get coordinates of user pin, fallback to Yosemite Valley center
+            const lat = touristMarker ? touristMarker.getLatLng().lat : defaultCenter[0];
+            const lng = touristMarker ? touristMarker.getLatLng().lng : defaultCenter[1];
+            formData.append("lat", lat);
+            formData.append("lng", lng);
+
+            fetch(`${backend}/api/trips/danger-zones/${zoneId}/photos/upload`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                body: formData
+            })
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then(data => {
+                statusDiv.innerText = "Photo added successfully!";
+                statusDiv.style.color = "#10b981";
+                // Reload gallery
+                loadZonePhotos(zoneId);
+            })
+            .catch(err => {
+                statusDiv.innerText = "Error uploading photo.";
+                statusDiv.style.color = "#ef4444";
+                console.error("Photo upload error:", err);
+            });
+        }
+
+        // Capacitor Photo Capture & Notifications APIs
+        function triggerPhotoCapture(zoneId) {
+            const cap = window.parent.Capacitor || window.Capacitor;
+            if (cap && cap.Plugins && cap.Plugins.Camera) {
+                const Camera = cap.Plugins.Camera;
+                Camera.getPhoto({
+                    quality: 90,
+                    allowEditing: false,
+                    resultType: 'dataUrl',
+                    source: 'CAMERA'
+                }).then((image) => {
+                    uploadCapacitorPhoto(image.dataUrl, zoneId);
+                }).catch((err) => {
+                    console.error("Capacitor camera capture error:", err);
+                });
+            } else {
+                // Fallback to browser file picker
+                const input = document.getElementById(`photo-upload-input-${zoneId}`);
+                if (input) input.click();
+            }
+        }
+
+        function uploadCapacitorPhoto(dataUrl, zoneId) {
+            const statusDiv = document.getElementById(`upload-status-${zoneId}`);
+            if (statusDiv) {
+                statusDiv.innerText = "Uploading camera photo...";
+                statusDiv.style.color = "#94a3b8";
+            }
+
+            fetch(dataUrl)
+                .then(res => res.blob())
+                .then(blob => {
+                    const formData = new FormData();
+                    formData.append("file", blob, "camera_photo.jpg");
+                    
+                    const lat = touristMarker ? touristMarker.getLatLng().lat : defaultCenter[0];
+                    const lng = touristMarker ? touristMarker.getLatLng().lng : defaultCenter[1];
+                    formData.append("lat", lat);
+                    formData.append("lng", lng);
+
+                    return fetch(`${backend}/api/trips/danger-zones/${zoneId}/photos/upload`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: formData
+                    });
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                })
+                .then(data => {
+                    if (statusDiv) {
+                        statusDiv.innerText = "Photo added successfully!";
+                        statusDiv.style.color = "#10b981";
+                    }
+                    loadZonePhotos(zoneId);
+                })
+                .catch(err => {
+                    if (statusDiv) {
+                        statusDiv.innerText = "Error uploading photo.";
+                        statusDiv.style.color = "#ef4444";
+                    }
+                    console.error("Capacitor photo upload error:", err);
+                });
+        }
+
+        function triggerNativeNotification(title, body) {
+            const cap = window.parent.Capacitor || window.Capacitor;
+            if (cap && cap.Plugins && cap.Plugins.LocalNotifications) {
+                const LocalNotifications = cap.Plugins.LocalNotifications;
+                LocalNotifications.requestPermissions().then((status) => {
+                    if (status.display === 'granted') {
+                        return LocalNotifications.schedule({
+                            notifications: [{
+                                title: title,
+                                body: body,
+                                id: Math.floor(Math.random() * 100000),
+                                schedule: { at: new Date(Date.now() + 100) }
+                            }]
+                        });
+                    }
+                }).catch(err => console.error("Notification permission error:", err));
+            }
+        }
+
+        // Initialize Tourist Marker
+        if (tripId && token) {
+            touristMarker = L.marker(defaultCenter, {
+                icon: touristIcon,
+                draggable: true
+            }).addTo(map);
+
+            touristMarker.bindPopup("<b>Your simulated location</b><br/>Drag me to send location pings.").openPopup();
+
+            touristMarker.on('dragend', function (event) {
+                const marker = event.target;
+                const position = marker.getLatLng();
+                sendPing(position.lat, position.lng);
+                checkBatteryAndRisk(position.lat, position.lng);
+            });
+
+            // Start the background tracking service (default 5 minutes)
+            startTracking(300000);
+        } else {
+            document.getElementById('tourist-status').innerHTML = '<span style="color: #ef4444">Missing parameters.</span>';
+        }
+
+        function showLocationPermissionDeniedError() {
+            document.getElementById('location-error-banner').style.display = 'block';
+            document.getElementById('tourist-status').innerHTML = '<span style="color: #ef4444">Location permission denied.</span>';
+        }
+
+        function manualCheckIn() {
+            if (touristMarker) {
+                const position = touristMarker.getLatLng();
+                sendPing(position.lat, position.lng);
+            } else {
+                sendPing(defaultCenter[0], defaultCenter[1]);
+            }
+        }
+
+        // Send location ping
+        function sendPing(lat, lng) {
+            const isOnline = navigator.onLine;
+            document.getElementById('tourist-status').innerHTML = `Sending ping: ${lat.toFixed(4)}, ${lng.toFixed(4)}...`;
+            
+            if (isOnline) {
+                fetch(`${backend}/api/trips/${tripId}/ping`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ lat: lat, lng: lng })
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                })
+                .then(data => {
+                    document.getElementById('tourist-status').innerHTML = `Ping recorded at ${new Date().toLocaleTimeString()}.`;
+                    
+                    lastSyncTime = new Date().toISOString();
+                    (async () => {
+                        let list = JSON.parse(await prefHelper.get('cached_gps_coordinates') || '[]');
+                        list.push({ lat: lat, lng: lng, timestamp: lastSyncTime });
+                        if (list.length > 5) {
+                            list = list.slice(-5);
+                        }
+                        await prefHelper.set('cached_gps_coordinates', list);
+                        localStorage.setItem('last_lat', lat);
+                        localStorage.setItem('last_lng', lng);
+                    })();
+                    
+                    const alerts = data.alerts_triggered;
+                    const indicator = document.getElementById('alert-indicator');
+                    
+                    if (alerts.length > 0) {
+                        indicator.innerText = `Active Alerts: ${alerts.join(', ')}`;
+                        if (alerts.includes('geofence') || alerts.some(a => a.startsWith('distress'))) {
+                            indicator.className = 'status-badge status-danger';
+                            
+                            window.parent.postMessage({
+                                type: 'alert_triggered',
+                                alerts: alerts,
+                                lat: lat,
+                                lng: lng
+                            }, '*');
+
+                            triggerNativeNotification("⚠️ High-Risk Boundary Breach", "You have entered a high-risk geofence zone! Please review the suggested detour.");
+                        } else {
+                            indicator.className = 'status-badge status-warning';
+                        }
+                    } else {
+                        indicator.innerText = 'No Alerts Active';
+                        indicator.className = 'status-badge status-success';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('tourist-status').innerHTML = `<span style="color: #ef4444">Ping failed: ${err.message}</span>`;
+                });
+            } else {
+                (async () => {
+                    let queue = JSON.parse(await prefHelper.get('queued_pings') || '[]');
+                    queue.push({ lat: lat, lng: lng, timestamp: new Date().toISOString() });
+                    await prefHelper.set('queued_pings', queue);
+                    document.getElementById('tourist-status').innerHTML = `<span style="color: #f59e0b">Offline: Location queued locally.</span>`;
+                })();
+            }
+        }
+
+        // --- TRIP BUDDY MULTI-USER SHARING ---
+        let memberMarkers = {};
+
+        function getColoredIcon(color) {
+            return L.icon({
+                iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            });
+        }
+
+        function updateGroupMembers() {
+            fetch(`${backend}/api/trips/group/members`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("Not in group or error fetching");
+                return res.json();
+            })
+            .then(members => {
+                const fetchedIds = new Set();
+                let currentUserId = null;
+                try {
+                    const base64Url = token.split('.')[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                    }).join(''));
+                    currentUserId = JSON.parse(jsonPayload).sub;
+                } catch (e) {
+                    console.error("Error decoding token:", e);
+                }
+
+                members.forEach(member => {
+                    fetchedIds.add(member.user_id);
+
+                    if (currentUserId && parseInt(currentUserId) === parseInt(member.user_id)) {
+                        return;
+                    }
+
+                    if (member.lat !== null && member.lng !== null) {
+                        if (memberMarkers[member.user_id]) {
+                            memberMarkers[member.user_id].setLatLng([member.lat, member.lng]);
+                        } else {
+                            const marker = L.marker([member.lat, member.lng], {
+                                icon: getColoredIcon(member.color)
+                            }).addTo(map);
+                            const lastActive = member.timestamp ? new Date(member.timestamp).toLocaleTimeString() : 'Never';
+                            marker.bindPopup(`<b>Trip Buddy</b><br/>Phone: ${member.phone_number}<br/>Last Active: ${lastActive}`);
+                            memberMarkers[member.user_id] = marker;
+                        }
+                    }
+                });
+
+                Object.keys(memberMarkers).forEach(id => {
+                    if (!fetchedIds.has(parseInt(id))) {
+                        map.removeLayer(memberMarkers[id]);
+                        delete memberMarkers[id];
+                    }
+                });
+            })
+            .catch(err => {
+                Object.keys(memberMarkers).forEach(id => {
+                    map.removeLayer(memberMarkers[id]);
+                    delete memberMarkers[id];
+                });
+            });
+        }
+
+        if (tripId && token) {
+            setInterval(updateGroupMembers, 5000);
+            updateGroupMembers();
+            
+            // Initialize data caching or offline load
+            initMapData();
+        }
+    </script>
+</body>
+</html>

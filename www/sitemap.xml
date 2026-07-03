@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<urlset xmlns="https://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>http://localhost:3000/</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/tourist/active</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/authority</loc>
+  </url>
+  <url>
+    <loc>http://localhost:3000/authority/dashboard</loc>
+  </url>
+</urlset>
