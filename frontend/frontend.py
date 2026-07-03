@@ -35,6 +35,12 @@ class State(rx.State):
     tourist_user_id: int = 0
     tourist_name: str = ""
     
+    # Destination Search State
+    search_query: str = ""
+    search_suggestions: List[Dict[str, Any]] = []
+    selected_lat: float = 0.0
+    selected_lng: float = 0.0
+    
     # Multilingual language support state
     language: str = "en"
 
@@ -368,8 +374,10 @@ class State(rx.State):
                 self.active_checkin_interval = data.get("checkin_interval_hours") or 0.0
                 self.active_last_checkin = data.get("last_checkin_at") or ""
                 
-                # Update tourist map url dynamically
-                self.tourist_map_url = f"/tourist_map.html?token={self.tourist_token}&trip_id={self.active_trip_id}&backend={BACKEND_URL}"
+                # Update tourist map url dynamically with destination coordinates
+                d_lat = data.get("region_lat") or 0.0
+                d_lng = data.get("region_lng") or 0.0
+                self.tourist_map_url = f"/tourist_map.html?token={self.tourist_token}&trip_id={self.active_trip_id}&backend={BACKEND_URL}&dest_lat={d_lat}&dest_lng={d_lng}"
                 
                 # Check if SOS is active (check if this trip has open SOS alerts)
                 self.check_sos_status()
@@ -400,6 +408,48 @@ class State(rx.State):
         except Exception as e:
             print("Check SOS status failed:", e)
 
+    @rx.event(background=True)
+    async def handle_search_change(self, val: str):
+        async with self:
+            self.search_query = val
+            if not val.strip():
+                self.search_suggestions = []
+                return
+        
+        # Debounce sleep for 400ms
+        await asyncio.sleep(0.4)
+        
+        async with self:
+            if self.search_query != val:
+                return
+        
+        try:
+            import urllib.parse
+            encoded_query = urllib.parse.quote(val)
+            url = f"https://nominatim.openstreetmap.org/search?q={encoded_query}&format=json&limit=5"
+            headers = {"User-Agent": "SafeTrip-Web-App-Agent/1.0"}
+            res = requests.get(url, headers=headers, timeout=3)
+            if res.status_code == 200:
+                data = res.json()
+                suggestions = []
+                for item in data:
+                    suggestions.append({
+                        "display_name": item.get("display_name", ""),
+                        "lat": float(item.get("lat", 0.0)),
+                        "lng": float(item.get("lon", 0.0))
+                    })
+                async with self:
+                    self.search_suggestions = suggestions
+        except Exception as e:
+            print("Nominatim search failed:", e)
+
+    def select_suggestion(self, sugg: Dict[str, Any]):
+        self.form_region = sugg["display_name"]
+        self.search_query = sugg["display_name"]
+        self.selected_lat = float(sugg["lat"])
+        self.selected_lng = float(sugg["lng"])
+        self.search_suggestions = []
+
     def request_briefing(self):
         if not self.tourist_token:
             self.tourist_error = "You must be logged in"
@@ -412,7 +462,11 @@ class State(rx.State):
             return
 
         headers = {"Authorization": f"Bearer {self.tourist_token}"}
-        payload = {"region": self.form_region.strip()}
+        payload = {
+            "region": self.form_region.strip(),
+            "lat": self.selected_lat if self.selected_lat != 0.0 else None,
+            "lng": self.selected_lng if self.selected_lng != 0.0 else None
+        }
         try:
             res = requests.post(f"{BACKEND_URL}/api/trips/briefing", json=payload, headers=headers)
             if res.status_code == 200:
@@ -471,7 +525,9 @@ class State(rx.State):
             "start_date": start_dt,
             "end_date": end_dt,
             "region": self.form_region.strip(),
-            "checkin_interval_hours": interval_hours
+            "checkin_interval_hours": interval_hours,
+            "region_lat": self.selected_lat if self.selected_lat != 0.0 else None,
+            "region_lng": self.selected_lng if self.selected_lng != 0.0 else None
         }
 
         try:
@@ -486,8 +542,10 @@ class State(rx.State):
                 self.active_last_checkin = data.get("last_checkin_at") or ""
                 self.tourist_error = ""
                 
-                # Set map URL
-                self.tourist_map_url = f"/tourist_map.html?token={self.tourist_token}&trip_id={self.active_trip_id}&backend={BACKEND_URL}"
+                # Set map URL with coordinates
+                d_lat = data.get("region_lat") or 0.0
+                d_lng = data.get("region_lng") or 0.0
+                self.tourist_map_url = f"/tourist_map.html?token={self.tourist_token}&trip_id={self.active_trip_id}&backend={BACKEND_URL}&dest_lat={d_lat}&dest_lng={d_lng}"
                 
                 return rx.redirect("/tourist/active")
             else:
@@ -1179,16 +1237,42 @@ def index() -> rx.Component:
                             rx.text(f"Logged in as {State.tourist_phone}. Ready to register your safe boundary monitoring?", size="2", color="#94a3b8", margin_bottom="6"),
                             
                             rx.text(State.translation["trip_region"], size="2", font_weight="bold", color="#cbd5e1", width="100%", margin_bottom="1"),
-                            rx.input(
-                                placeholder="Yosemite National Park",
-                                value=State.form_region,
-                                on_change=State.set_form_region,
-                                size="3",
-                                margin_bottom="4",
-                                bg="#0b0f19",
-                                border="1px solid rgba(255, 255, 255, 0.1)",
-                                color="white",
+                            rx.box(
+                                rx.input(
+                                    placeholder="Search destination (e.g. Mumbai, Yosemite)",
+                                    value=State.search_query,
+                                    on_change=State.handle_search_change,
+                                    size="3",
+                                    bg="#0b0f19",
+                                    border="1px solid rgba(255, 255, 255, 0.1)",
+                                    color="white",
+                                    width="100%",
+                                ),
+                                rx.cond(
+                                    State.search_suggestions.length() > 0,
+                                    rx.vstack(
+                                        rx.foreach(
+                                            State.search_suggestions,
+                                            lambda sugg: rx.box(
+                                                rx.text(sugg["display_name"], color="white", size="2", cursor="pointer"),
+                                                padding="2",
+                                                width="100%",
+                                                _hover={"bg": "rgba(255, 255, 255, 0.1)"},
+                                                on_click=lambda: State.select_suggestion(sugg),
+                                            )
+                                        ),
+                                        bg="#0f172a",
+                                        border="1px solid rgba(255, 255, 255, 0.1)",
+                                        border_radius="6px",
+                                        width="100%",
+                                        max_height="200px",
+                                        overflow_y="auto",
+                                        z_index="10",
+                                        margin_top="1",
+                                    )
+                                ),
                                 width="100%",
+                                margin_bottom="4",
                             ),
 
                             rx.text(State.translation["trip_dates"], size="2", font_weight="bold", color="#cbd5e1", width="100%", margin_bottom="1"),
