@@ -436,12 +436,10 @@ class State(rx.State):
         self.show_briefing_card = False
 
     def confirm_start_trip(self):
-        print(">>> [REFLEX EVENT] confirm_start_trip called!")
         self.show_briefing_card = False
         return self.start_trip()
 
     def start_trip(self):
-        print(f">>> [REFLEX STATE] start_trip execution started. Region: '{self.form_region}', Token length: {len(self.tourist_token) if self.tourist_token else 0}")
         if not self.tourist_token:
             self.tourist_error = "You must be logged in"
             return
@@ -1555,17 +1553,6 @@ def active_trip() -> rx.Component:
                     background_color="rgba(15, 23, 42, 0.8)",
                     border_bottom="1px solid rgba(255, 255, 255, 0.05)",
                     align="center",
-                ),
-                
-                # Debug Info Panel
-                rx.vstack(
-                    rx.text(f"DEBUG - tourist_token (len): {State.tourist_token.length()}", color="#f43f5e", font_size="12px", font_family="monospace"),
-                    rx.text(f"DEBUG - active_trip_id: {State.active_trip_id}", color="#f43f5e", font_size="12px", font_family="monospace"),
-                    rx.text(f"DEBUG - tourist_map_url: {State.tourist_map_url}", color="#f43f5e", font_size="12px", font_family="monospace"),
-                    padding="2",
-                    bg="#881337",
-                    width="100%",
-                    align_items="start",
                 ),
 
                 # Map Embed and large SOS button
