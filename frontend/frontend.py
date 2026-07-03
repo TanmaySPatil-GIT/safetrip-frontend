@@ -25,6 +25,9 @@ class BriefingZoneItem(BaseModel):
     name: str
     risk_score: float
     risk_level: str
+    photo_url: Optional[str] = None
+    hazard_type: Optional[str] = None
+    avoid_caption: Optional[str] = None
 
 class State(rx.State):
     # --- TOURIST STATE ---
@@ -230,6 +233,7 @@ class State(rx.State):
     # Pre-Trip Briefing State
     show_briefing_card: bool = False
     briefing_zones: List[BriefingZoneItem] = []
+    briefing_destination_photo: str = ""
     briefing_temp: float = 0.0
     briefing_cond: str = ""
     briefing_rain_status: str = ""
@@ -478,6 +482,7 @@ class State(rx.State):
             if res.status_code == 200:
                 data = res.json()
                 self.briefing_zones = [BriefingZoneItem(**z) for z in data["danger_zones"]]
+                self.briefing_destination_photo = data.get("destination_photo_url") or ""
                 self.briefing_temp = data["weather"]["temp"]
                 self.briefing_cond = data["weather"]["condition"]
                 self.briefing_rain_status = data["weather"]["rainfall_status"]
@@ -1362,6 +1367,19 @@ def index() -> rx.Component:
                         margin_bottom="4",
                     ),
                     
+                    rx.cond(
+                        State.briefing_destination_photo != "",
+                        rx.image(
+                            src=State.briefing_destination_photo,
+                            width="100%",
+                            height="180px",
+                            object_fit="cover",
+                            border_radius="8px",
+                            margin_bottom="4",
+                            alt="Destination Banner"
+                        )
+                    ),
+                    
                     # Safe hours & Weather details
                     rx.vstack(
                         rx.hstack(
@@ -1401,15 +1419,53 @@ def index() -> rx.Component:
                                 rx.foreach(
                                     State.briefing_zones,
                                     lambda z: rx.hstack(
-                                        rx.text(z.name, color="white", size="2"),
-                                        rx.spacer(),
-                                        rx.text(f"Score: {z.risk_score} ({z.risk_level.upper()})", color=rx.cond(z.risk_score >= 70, "#ef4444", rx.cond(z.risk_score >= 40, "#f59e0b", "#10b981")), size="2", font_weight="bold"),
+                                        rx.cond(
+                                            z.photo_url != "",
+                                            rx.image(
+                                                src=z.photo_url,
+                                                width="75px",
+                                                height="75px",
+                                                object_fit="cover",
+                                                border_radius="6px",
+                                                margin_right="2",
+                                            ),
+                                            rx.image(
+                                                src="https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80",
+                                                width="75px",
+                                                height="75px",
+                                                object_fit="cover",
+                                                border_radius="6px",
+                                                margin_right="2",
+                                            )
+                                        ),
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.text(z.name, color="white", size="2", font_weight="bold"),
+                                                rx.spacer(),
+                                                rx.text(f"Score: {z.risk_score} ({z.risk_level.upper()})", color=rx.cond(z.risk_score >= 70, "#ef4444", rx.cond(z.risk_score >= 40, "#f59e0b", "#10b981")), size="2", font_weight="bold"),
+                                                width="100%",
+                                                align="center",
+                                            ),
+                                            rx.cond(
+                                                z.avoid_caption != "",
+                                                rx.text(z.avoid_caption, size="2", color="#cbd5e1", font_style="italic"),
+                                                rx.text(f"Risk Score: {z.risk_score}/100. Exercise caution.", size="2", color="#cbd5e1")
+                                            ),
+                                            rx.cond(
+                                                (z.hazard_type != "") & (z.hazard_type != "curated_danger_zone"),
+                                                rx.text("Illustrative image", size="1", color="#64748b", font_style="italic")
+                                            ),
+                                            align_items="start",
+                                            spacing="1",
+                                            width="100%",
+                                        ),
                                         width="100%",
-                                        bg="rgba(15, 23, 42, 0.3)",
-                                        padding_x="3",
-                                        padding_y="2",
-                                        border_radius="6px",
+                                        bg="rgba(15, 23, 42, 0.4)",
+                                        padding="3",
+                                        border_radius="8px",
                                         border="1px solid rgba(255, 255, 255, 0.05)",
+                                        margin_bottom="2",
+                                        align_items="center",
                                     )
                                 ),
                                 width="100%",
