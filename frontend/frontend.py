@@ -1554,6 +1554,17 @@ def active_trip() -> rx.Component:
                     border_bottom="1px solid rgba(255, 255, 255, 0.05)",
                     align="center",
                 ),
+                
+                # Debug Info Panel
+                rx.vstack(
+                    rx.text(f"DEBUG - tourist_token (len): {State.tourist_token.length()}", color="#f43f5e", font_size="12px", font_family="monospace"),
+                    rx.text(f"DEBUG - active_trip_id: {State.active_trip_id}", color="#f43f5e", font_size="12px", font_family="monospace"),
+                    rx.text(f"DEBUG - tourist_map_url: {State.tourist_map_url}", color="#f43f5e", font_size="12px", font_family="monospace"),
+                    padding="2",
+                    bg="#881337",
+                    width="100%",
+                    align_items="start",
+                ),
 
                 # Map Embed and large SOS button
                 rx.box(
