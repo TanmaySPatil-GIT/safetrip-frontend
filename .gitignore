@@ -1,3 +1,8 @@
+.web
+*.py[cod]
+assets/external/
+.states
+*.db
 node_modules/
 android/app/build/
 android/.gradle/
