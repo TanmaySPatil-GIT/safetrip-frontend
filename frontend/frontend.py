@@ -48,6 +48,12 @@ class State(rx.State):
     def translation(self) -> Dict[str, str]:
         return translations.get(self.language, translations["en"])
 
+    @rx.var
+    def briefing_title(self) -> str:
+        if len(self.briefing_zones) == 1 and self.briefing_zones[0].name == "General Trip Area":
+            return "Area Risk Rating:"
+        return "Danger Zones in Region:"
+
     @rx.event
     def load_language_preference(self):
         js_code = """
@@ -1388,7 +1394,7 @@ def index() -> rx.Component:
                     
                     # Danger Zones in Region
                     rx.vstack(
-                        rx.text("Danger Zones in Region:", size="2", font_weight="bold", color="#94a3b8"),
+                        rx.text(State.briefing_title, size="2", font_weight="bold", color="#94a3b8"),
                         rx.cond(
                             State.briefing_zones.length() > 0,
                             rx.vstack(
