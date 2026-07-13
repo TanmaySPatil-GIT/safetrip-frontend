@@ -1106,9 +1106,31 @@
                         ]);
                         map.fitBounds(bounds, {padding: [50, 50]});
                     }
+                } else {
+                    throw new Error("No routes in OSRM response");
                 }
             })
-            .catch(err => console.error("OSRM routing failed:", err));
+            .catch(err => {
+                console.error("OSRM routing failed, drawing straight dashed line fallback:", err);
+                if (window.activeRouteLine) {
+                    map.removeLayer(window.activeRouteLine);
+                }
+                
+                window.activeRouteLine = L.polyline([[lat1, lng1], [lat2, lng2]], {
+                    color: '#3b82f6',
+                    weight: 4,
+                    dashArray: '5, 10',
+                    opacity: 0.7
+                }).addTo(map);
+                
+                if (fitBounds) {
+                    const bounds = L.latLngBounds([
+                        [lat1, lng1],
+                        [lat2, lng2]
+                    ]);
+                    map.fitBounds(bounds, {padding: [50, 50]});
+                }
+            });
         }
 
         function initializeTouristMarker(lat, lng) {
@@ -1153,12 +1175,30 @@
                 destMarker.bindPopup("<b>Destination</b>");
             }
 
+        // Setup Real GPS Location Marker
+        let realLocationMarker = null;
+        function updateRealLocationMarker(lat, lng) {
+            if (realLocationMarker) {
+                realLocationMarker.setLatLng([lat, lng]);
+            } else {
+                realLocationMarker = L.circleMarker([lat, lng], {
+                    radius: 8,
+                    color: '#ffffff',
+                    weight: 2.5,
+                    fillColor: '#1d4ed8', // Distinct Google-Maps-style blue dot
+                    fillOpacity: 1.0
+                }).addTo(map);
+                realLocationMarker.bindPopup("<b>You are here (Real GPS)</b>");
+            }
+        }
+
             // Get user's current location via Geolocation API
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(position => {
                     const curLat = position.coords.latitude;
                     const curLng = position.coords.longitude;
                     
+                    updateRealLocationMarker(curLat, curLng);
                     initializeTouristMarker(curLat, curLng);
                     
                     if (hasDestCoords) {
@@ -1174,6 +1214,26 @@
                     if (hasDestCoords) {
                         drawRoute(defaultCenter[0], defaultCenter[1], dLat, dLng);
                     }
+                });
+
+                // Start watchPosition for live updates every 30-60 seconds
+                navigator.geolocation.watchPosition(position => {
+                    const curLat = position.coords.latitude;
+                    const curLng = position.coords.longitude;
+                    
+                    console.log("GPS watch position update:", curLat, curLng);
+                    updateRealLocationMarker(curLat, curLng);
+                    
+                    // Live route redraw from actual location to destination
+                    if (hasDestCoords) {
+                        drawRoute(curLat, curLng, dLat, dLng, false); // don't jump camera bounds on updates
+                    }
+                }, err => {
+                    console.warn("GPS watch location error:", err);
+                }, {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 30000
                 });
             } else {
                 initializeTouristMarker(defaultCenter[0], defaultCenter[1]);
