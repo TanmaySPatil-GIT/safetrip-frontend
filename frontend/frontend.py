@@ -229,6 +229,48 @@ class State(rx.State):
             return alert_obj.get("id", 0)
         return 0
 
+    @rx.var
+    def checkin_countdown_msg(self) -> str:
+        if self.active_checkin_interval <= 0 or not self.active_last_checkin:
+            return ""
+        try:
+            import datetime
+            clean_str = self.active_last_checkin.replace("Z", "")
+            if "." in clean_str:
+                clean_str = clean_str.split(".")[0]
+            last_dt = datetime.datetime.fromisoformat(clean_str)
+            now_dt = datetime.datetime.utcnow()
+            
+            due_dt = last_dt + datetime.timedelta(hours=self.active_checkin_interval)
+            delta = due_dt - now_dt
+            minutes_left = int(delta.total_seconds() / 60)
+            
+            if minutes_left > 0:
+                return f"Next check-in due in {minutes_left} minutes"
+            else:
+                return f"Check-in was due {-minutes_left} minutes ago!"
+        except Exception as e:
+            print("Failed calculating checkin countdown:", e)
+            return ""
+
+    @rx.var
+    def is_checkin_overdue(self) -> bool:
+        if self.active_checkin_interval <= 0 or not self.active_last_checkin:
+            return False
+        try:
+            import datetime
+            clean_str = self.active_last_checkin.replace("Z", "")
+            if "." in clean_str:
+                clean_str = clean_str.split(".")[0]
+            last_dt = datetime.datetime.fromisoformat(clean_str)
+            now_dt = datetime.datetime.utcnow()
+            
+            due_dt = last_dt + datetime.timedelta(hours=self.active_checkin_interval)
+            return now_dt > due_dt
+        except Exception as e:
+            print("Failed checkin overdue calculation:", e)
+            return False
+
 
     # Pre-Trip Briefing State
     show_briefing_card: bool = False
@@ -1595,6 +1637,22 @@ def active_trip() -> rx.Component:
                     )
                 ),
                 
+                # Overdue Check-in Warning Banner
+                rx.cond(
+                    State.is_checkin_overdue,
+                    rx.box(
+                        rx.hstack(
+                            rx.text("⚠️ WARNING: Your check-in is overdue! Please click 'I'm Safe' immediately to avoid triggering emergency responses.", color="white", font_weight="bold", size="3"),
+                            width="100%",
+                            align="center",
+                        ),
+                        bg="#ef4444",
+                        padding_y="3",
+                        padding_x="6",
+                        width="100%",
+                    )
+                ),
+                
                 # Active Trip Info bar
                 rx.hstack(
                     rx.vstack(
@@ -1602,7 +1660,12 @@ def active_trip() -> rx.Component:
                         rx.text(f"Trip ID: #{State.active_trip_id} | End Date: {State.active_trip_end}", size="2", color="#94a3b8"),
                         rx.cond(
                             State.active_checkin_interval > 0,
-                            rx.text(f"Check-In: every {State.active_checkin_interval}h | Last: {State.active_last_checkin}", size="2", color="#10b981", font_weight="semibold"),
+                            rx.vstack(
+                                rx.text(f"Check-In: every {State.active_checkin_interval}h | Last: {State.active_last_checkin}", size="2", color="#10b981", font_weight="semibold"),
+                                rx.text(State.checkin_countdown_msg, size="2", color="#fbbf24", font_weight="bold"),
+                                align_items="start",
+                                spacing="1",
+                            ),
                         ),
                         align_items="start",
                     ),
